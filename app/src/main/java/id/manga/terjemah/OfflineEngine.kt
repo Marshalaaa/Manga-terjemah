@@ -67,7 +67,8 @@ class OfflineEngine {
             }
 
             jp = cleanup(jp)
-            if (!isMostlyJapanese(jp)) continue // buang tombol/UI situs, angka, efek suara 1 huruf
+            if (!isMostlyJapanese(jp)) continue // lewati tombol/UI situs, angka, huruf tunggal
+            if (isSoundEffect(jp, screen, rect, group)) continue // efek suara dibiarkan asli
             val id = cache[jp] ?: translator.translate(jp).await().trim().also { cache[jp] = it }
             if (id.isNotEmpty()) out += TextBox(rect, id)
         }
@@ -191,6 +192,41 @@ class OfflineEngine {
         val core = s.filter { !it.isWhitespace() && it !in PUNCT }
         val jp = japaneseCount(core)
         return jp >= 2 && jp * 2 >= core.length
+    }
+
+    /**
+     * Efek suara (ドドド, ガシャン, ザワ…) biasanya: pendek, hanya katakana, dan digambar langsung
+     * di atas gambar — bukan di dalam balon putih. Dialog katakana pendek di balon putih (ウソ！)
+     * tetap diterjemahkan karena latar belakangnya putih.
+     */
+    private fun isSoundEffect(jp: String, screen: Bitmap, rect: Rect, group: List<Frag>): Boolean {
+        val core = jp.filter { !it.isWhitespace() && it !in PUNCT || it == 'ー' }
+        if (core.isEmpty() || core.length > 8) return false
+        val katakanaOnly = core.all { it in '゠'..'ヿ' || it in 'ｦ'..'ﾟ' }
+        if (!katakanaOnly) return false
+        return whiteRatio(screen, rect, group) < 0.5f
+    }
+
+    /** Fraksi piksel terang di sekitar teks (balon dialog = mayoritas putih). */
+    private fun whiteRatio(screen: Bitmap, rect: Rect, group: List<Frag>): Float {
+        val pad = (group.map { it.charSize }.average() * 0.5).toInt()
+        val l = max(0, rect.left - pad)
+        val t = max(0, rect.top - pad)
+        val r = min(screen.width - 1, rect.right + pad)
+        val b = min(screen.height - 1, rect.bottom + pad)
+        if (r <= l || b <= t) return 1f
+        var white = 0
+        var total = 0
+        val n = 16
+        for (iy in 0 until n) for (ix in 0 until n) {
+            val x = l + (r - l) * ix / (n - 1)
+            val y = t + (b - t) * iy / (n - 1)
+            val c = screen.getPixel(x, y)
+            val lum = (Color.red(c) * 3 + Color.green(c) * 6 + Color.blue(c)) / 10
+            if (lum > 200) white++
+            total++
+        }
+        return white.toFloat() / total
     }
 
     private fun cleanup(s: String): String = s
