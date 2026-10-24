@@ -11,11 +11,15 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.InputType
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -32,6 +36,12 @@ class MainActivity : Activity() {
     private lateinit var overlayStatus: TextView
     private lateinit var modelStatus: TextView
     private lateinit var downloadBtn: Button
+    private lateinit var rbOffline: RadioButton
+    private lateinit var rbGemini: RadioButton
+    private lateinit var geminiSection: LinearLayout
+    private lateinit var keyInput: EditText
+    private lateinit var modelInput: EditText
+    private lateinit var testStatus: TextView
     private lateinit var startBtn: Button
     private lateinit var stopBtn: Button
     private var modelsReady = false
@@ -39,6 +49,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildUi())
+        loadPrefs()
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -50,6 +61,11 @@ class MainActivity : Activity() {
         super.onResume()
         refreshStatus()
         checkModels()
+    }
+
+    override fun onPause() {
+        savePrefs() // perubahan mode langsung dipakai penerjemah yang sedang berjalan
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -88,14 +104,56 @@ class MainActivity : Activity() {
         })
 
         // Langkah 2
-        root.addView(header("2. Model terjemahan offline"))
+        root.addView(header("2. Pilih mode"))
+        rbGemini = RadioButton(this).apply {
+            id = View.generateViewId()
+            text = "Online – Gemini (jauh lebih akurat, gratis dengan kuota harian)"
+        }
+        rbOffline = RadioButton(this).apply {
+            id = View.generateViewId()
+            text = "Offline – ML Kit (tanpa internet, kualitas standar)"
+        }
+        root.addView(RadioGroup(this).apply {
+            addView(rbGemini)
+            addView(rbOffline)
+            setOnCheckedChangeListener { _, _ -> updateModeUi() }
+        })
+
+        geminiSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        geminiSection.addView(note(
+            "Buat API key gratis di Google AI Studio (login akun Google → Create API key), " +
+                "lalu salin dan tempel di bawah. Jangan bagikan key ini ke siapa pun."
+        ))
+        geminiSection.addView(button("Buka Google AI Studio") {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey")))
+        })
+        keyInput = EditText(this).apply {
+            hint = "Tempel API key Gemini di sini"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine()
+        }
+        geminiSection.addView(keyInput)
+        geminiSection.addView(note("Model (biarkan default kalau ragu):"))
+        modelInput = EditText(this).apply {
+            hint = Prefs.DEFAULT_GEMINI_MODEL
+            setSingleLine()
+        }
+        geminiSection.addView(modelInput)
+        testStatus = note("")
+        geminiSection.addView(button("Tes API key") { testKey() })
+        geminiSection.addView(testStatus)
+        root.addView(geminiSection)
+
+        // Langkah 3
+        root.addView(header("3. Model offline (cadangan)"))
+        root.addView(note("Dipakai di mode offline, dan otomatis dipakai kalau kuota Gemini habis atau internet putus."))
         modelStatus = note("Memeriksa…")
         root.addView(modelStatus)
         downloadBtn = button("Unduh model (sekali saja, ±30 MB, pakai Wi-Fi)") { downloadModels() }
         root.addView(downloadBtn)
 
-        // Langkah 3
-        root.addView(header("3. Mulai"))
+        // Langkah 4
+        root.addView(header("4. Mulai"))
         root.addView(note(
             "Saat muncul dialog rekam layar, pilih \"Bagikan seluruh layar\" lalu Mulai. " +
                 "Setelah itu buka Chrome dan baca manga seperti biasa."
@@ -110,8 +168,9 @@ class MainActivity : Activity() {
 
         root.addView(header("Tips"))
         root.addView(note(
-            "• Scroll lalu diam ±½ detik → terjemahan muncul.\n" +
-                "• Kotak terjemahan sedikit transparan: ini aturan Android agar layar di bawahnya tetap bisa di-scroll.\n" +
+            "• Scroll lalu diam sebentar → terjemahan muncul (offline ±1 detik, Gemini beberapa detik).\n" +
+                "• Layar yang sudah diterjemahkan disimpan, jadi tidak memakai kuota lagi.\n" +
+                "• Kotak terjemahan sedikit transparan: aturan Android agar layar di bawahnya tetap bisa di-scroll.\n" +
                 "• Kalau layar diputar, hentikan lalu mulai lagi."
         ))
 
@@ -145,6 +204,24 @@ class MainActivity : Activity() {
         tv.setTextColor(Color.parseColor(if (ok) "#2E7D32" else "#C62828"))
     }
 
+    // ---------------- Pengaturan ----------------
+
+    private fun loadPrefs() {
+        if (Prefs.mode(this) == Prefs.MODE_GEMINI) rbGemini.isChecked = true else rbOffline.isChecked = true
+        keyInput.setText(Prefs.geminiKey(this))
+        modelInput.setText(Prefs.geminiModel(this))
+        updateModeUi()
+    }
+
+    private fun savePrefs() {
+        val mode = if (rbGemini.isChecked) Prefs.MODE_GEMINI else Prefs.MODE_OFFLINE
+        Prefs.save(this, mode, keyInput.text.toString(), modelInput.text.toString())
+    }
+
+    private fun updateModeUi() {
+        geminiSection.visibility = if (rbGemini.isChecked) View.VISIBLE else View.GONE
+    }
+
     private fun refreshStatus() {
         setStatus(overlayStatus, Settings.canDrawOverlays(this), "Sudah diizinkan", "Belum diizinkan")
         val running = TranslatorService.isRunning
@@ -153,7 +230,28 @@ class MainActivity : Activity() {
         startBtn.text = if (running) "Terjemahan live sedang berjalan" else "Mulai terjemahan live"
     }
 
-    // ---------------- Model ----------------
+    private fun testKey() {
+        savePrefs()
+        val key = Prefs.geminiKey(this)
+        if (key.isBlank()) {
+            setStatus(testStatus, false, "", "API key masih kosong")
+            return
+        }
+        testStatus.text = "Mengetes…"
+        testStatus.setTextColor(Color.GRAY)
+        scope.launch {
+            try {
+                val reply = GeminiEngine(key, Prefs.geminiModel(this@MainActivity)).test()
+                setStatus(testStatus, true, "API key berfungsi. Jawaban tes: ${reply.take(60)}", "")
+            } catch (e: GeminiEngine.QuotaException) {
+                setStatus(testStatus, false, "", "Key benar, tapi kuota sedang habis/terbatas: ${e.message?.take(120)}")
+            } catch (e: Exception) {
+                setStatus(testStatus, false, "", "Gagal: ${e.message?.take(160)}")
+            }
+        }
+    }
+
+    // ---------------- Model offline ----------------
 
     private fun checkModels() {
         scope.launch {
@@ -182,13 +280,21 @@ class MainActivity : Activity() {
     // ---------------- Mulai ----------------
 
     private fun startTranslator() {
+        savePrefs()
         if (!Settings.canDrawOverlays(this)) {
             toast("Izinkan dulu tampil di atas aplikasi lain (langkah 1)")
             return
         }
-        if (!modelsReady) {
-            toast("Unduh model terjemahan dulu (langkah 2)")
+        if (rbGemini.isChecked && keyInput.text.isBlank()) {
+            toast("Isi API key Gemini dulu, atau pilih mode offline")
             return
+        }
+        if (!rbGemini.isChecked && !modelsReady) {
+            toast("Unduh model offline dulu (langkah 3)")
+            return
+        }
+        if (rbGemini.isChecked && !modelsReady) {
+            toast("Tips: unduh juga model offline sebagai cadangan kalau kuota Gemini habis")
         }
         val mpm = getSystemService(MediaProjectionManager::class.java)
         startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE)

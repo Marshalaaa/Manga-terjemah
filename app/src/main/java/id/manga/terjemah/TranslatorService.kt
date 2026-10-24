@@ -75,6 +75,12 @@ class TranslatorService : Service() {
          */
         private const val OVERLAY_ALPHA = 0.8f
 
+        /** Dua layar dianggap sama kalau <1% grid berbeda. */
+        private const val CACHE_MATCH = 0.01f
+        private const val CACHE_SIZE = 40
+        /** Setelah kuota Gemini habis (HTTP 429), pakai offline selama ini sebelum mencoba lagi. */
+        private const val QUOTA_COOLDOWN_MS = 10 * 60 * 1000L
+
         @Volatile
         var isRunning = false
             private set
@@ -86,6 +92,16 @@ class TranslatorService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var engine: OfflineEngine? = null
+
+    // Mode online (main thread)
+    private var gemini: GeminiEngine? = null
+    private var geminiConfig: String? = null
+    private var geminiBlockedUntil = 0L
+    private var lastQuotaToast = 0L
+
+    /** Hasil terjemahan terakhir per "sidik jari" layar — layar yang sama tidak dikirim ulang. */
+    private class Cached(val sig: IntArray, val mode: String, val boxes: List<TextBox>)
+    private val resultCache = ArrayDeque<Cached>() // hanya di thread capture
 
     // Rekam layar
     private var projection: MediaProjection? = null
@@ -304,6 +320,21 @@ class TranslatorService : Service() {
 
     private fun onStable() {
         if (state != State.MOVING) return
+        val sigNow = lastSig
+        val mode = Prefs.mode(this)
+
+        // Layar ini sudah pernah diterjemahkan? Pakai hasil lama (hemat kuota & instan).
+        if (sigNow != null) {
+            val hit = resultCache.firstOrNull {
+                it.mode == mode && FrameSignature.diff(it.sig, sigNow, null) < CACHE_MATCH
+            }
+            if (hit != null) {
+                state = State.PROCESSING
+                onResult(hit.boxes, sigNow, mode)
+                return
+            }
+        }
+
         val bmp = grabFrame()
         if (bmp == null) {
             ch.postDelayed(stableCheck, SETTLE_MS) // belum ada frame
@@ -313,20 +344,54 @@ class TranslatorService : Service() {
         val sigAtCapture = lastSig
 
         scope.launch {
-            val eng = engine
             val boxes = try {
-                eng?.translate(bmp, bubbleRect()) ?: emptyList()
+                translateFrame(bmp, mode)
             } catch (e: Exception) {
                 errorToast(e)
                 emptyList()
             } finally {
                 bmp.recycle()
             }
-            ch.post { onResult(boxes, sigAtCapture) }
+            ch.post { onResult(boxes, sigAtCapture, mode) }
         }
     }
 
-    private fun onResult(boxes: List<TextBox>, sigAtCapture: IntArray?) {
+    /** Main thread. Mode Gemini dulu; kalau gagal/kuota habis, otomatis pakai offline. */
+    private suspend fun translateFrame(bmp: Bitmap, mode: String): List<TextBox> {
+        val exclude = bubbleRect()
+        val now = SystemClock.uptimeMillis()
+        if (mode == Prefs.MODE_GEMINI && now >= geminiBlockedUntil) {
+            val g = geminiEngine()
+            if (g != null) {
+                try {
+                    return g.translate(bmp, exclude)
+                } catch (e: GeminiEngine.QuotaException) {
+                    geminiBlockedUntil = now + QUOTA_COOLDOWN_MS
+                    if (now - lastQuotaToast > QUOTA_COOLDOWN_MS) {
+                        lastQuotaToast = now
+                        toast("Kuota Gemini sedang habis/terbatas. Sementara pakai mode offline, dicoba lagi 10 menit lagi.")
+                    }
+                } catch (e: Exception) {
+                    errorToast(e) // jaringan bermasalah dll -> pakai offline untuk layar ini
+                }
+            }
+        }
+        return engine?.translate(bmp, exclude) ?: emptyList()
+    }
+
+    private fun geminiEngine(): GeminiEngine? {
+        val key = Prefs.geminiKey(this)
+        if (key.isBlank()) return null
+        val model = Prefs.geminiModel(this)
+        val cfg = "$model|${key.hashCode()}"
+        if (gemini == null || geminiConfig != cfg) {
+            gemini = GeminiEngine(key, model)
+            geminiConfig = cfg
+        }
+        return gemini
+    }
+
+    private fun onResult(boxes: List<TextBox>, sigAtCapture: IntArray?, mode: String) {
         if (state != State.PROCESSING) return
         val cur = lastSig
         // Layar sudah berubah selama proses -> hasil basi, ulangi.
@@ -345,6 +410,12 @@ class TranslatorService : Service() {
                 baselineSig = sigAtCapture
                 mask = m
                 state = State.SHOWING
+                if (sigAtCapture != null &&
+                    resultCache.none { it.mode == mode && FrameSignature.diff(it.sig, sigAtCapture, null) < CACHE_MATCH }
+                ) {
+                    resultCache.addFirst(Cached(sigAtCapture, mode, boxes))
+                    while (resultCache.size > CACHE_SIZE) resultCache.removeLast()
+                }
                 // Kalau ada scroll di sela-sela tadi, langsung tangani.
                 val now = lastSig
                 if (now != null && sigAtCapture != null &&

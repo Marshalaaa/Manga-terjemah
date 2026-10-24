@@ -5,6 +5,16 @@ teks Jepang di layar otomatis ditimpa kotak terjemahan bahasa Indonesia. Saat ka
 lagi, kotaknya hilang dan akan muncul lagi di posisi baru ketika layar diam.
 Semua berjalan **offline di HP** (Google ML Kit), gratis, tanpa API key.
 
+## Mode online: Gemini (disarankan)
+
+Mode ini jauh lebih akurat, terutama untuk teks vertikal dan bahasa gaul.
+1. Buka Google AI Studio (tombol ada di aplikasi), login, pilih *Create API key*.
+2. Tempel key di aplikasi, lalu tekan **Tes API key**.
+3. Model default `gemini-3.5-flash-lite` memakai tier gratis yang punya kuota harian.
+   Kalau kuota habis (HTTP 429), aplikasi otomatis memakai mode offline selama 10 menit lalu mencoba lagi.
+4. Layar yang sama tidak dikirim ulang (ada cache), jadi kuota lebih hemat.
+Catatan: data tier gratis boleh dipakai Google untuk meningkatkan layanannya.
+
 ## Cara kerja singkat
 
 1. Layar direkam terus (izin rekam layar Android).
