@@ -11,8 +11,8 @@ android {
         applicationId = "id.manga.terjemah"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     buildTypes {
@@ -38,6 +38,8 @@ dependencies {
 
     // OCR Jepang (model ikut di dalam APK, jalan offline)
     implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
-    // Terjemahan on-device Jepang -> Indonesia (model diunduh sekali, lalu offline)
+    // OCR Korea (Hangul) untuk Weverse/webtoon, juga offline
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+    // Terjemahan on-device Jepang/Korea -> Indonesia (model diunduh sekali, lalu offline)
     implementation("com.google.mlkit:translate:17.0.3")
 }

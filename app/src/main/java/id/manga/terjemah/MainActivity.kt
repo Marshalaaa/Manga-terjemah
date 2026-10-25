@@ -36,6 +36,8 @@ class MainActivity : Activity() {
     private lateinit var overlayStatus: TextView
     private lateinit var modelStatus: TextView
     private lateinit var downloadBtn: Button
+    private lateinit var rbJa: RadioButton
+    private lateinit var rbKo: RadioButton
     private lateinit var rbOffline: RadioButton
     private lateinit var rbGemini: RadioButton
     private lateinit var geminiSection: LinearLayout
@@ -45,6 +47,7 @@ class MainActivity : Activity() {
     private lateinit var startBtn: Button
     private lateinit var stopBtn: Button
     private var modelsReady = false
+    private var loading = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,10 +91,30 @@ class MainActivity : Activity() {
             setTextColor(Color.parseColor("#E8453C"))
         })
         root.addView(note(
-            "Terjemahan live Jepang → Indonesia. Scroll seperti biasa; begitu kamu berhenti " +
-                "sebentar, teks Jepang di layar otomatis ditimpa terjemahan. " +
+            "Terjemahan live Jepang/Korea → Indonesia. Scroll seperti biasa; begitu kamu berhenti " +
+                "sebentar, teks di layar otomatis ditimpa terjemahan. " +
                 "Ketuk tombol 訳 untuk jeda/lanjut."
         ))
+
+        // Bahasa sumber
+        root.addView(header("Bahasa yang diterjemahkan"))
+        rbJa = RadioButton(this).apply {
+            id = View.generateViewId()
+            text = "Jepang – manga di Chrome"
+        }
+        rbKo = RadioButton(this).apply {
+            id = View.generateViewId()
+            text = "Korea – Weverse, webtoon, media sosial"
+        }
+        root.addView(RadioGroup(this).apply {
+            addView(rbJa)
+            addView(rbKo)
+            setOnCheckedChangeListener { _, _ ->
+                savePrefs() // langsung dipakai kalau terjemahan sedang berjalan
+                checkModels()
+            }
+        })
+        root.addView(note("Bisa diganti kapan saja, juga saat terjemahan live sedang berjalan."))
 
         // Langkah 1
         root.addView(header("1. Izin tampil di atas aplikasi lain"))
@@ -156,7 +179,7 @@ class MainActivity : Activity() {
         root.addView(header("4. Mulai"))
         root.addView(note(
             "Saat muncul dialog rekam layar, pilih \"Bagikan seluruh layar\" lalu Mulai. " +
-                "Setelah itu buka Chrome dan baca manga seperti biasa."
+                "Setelah itu buka Chrome (manga) atau Weverse dan baca seperti biasa."
         ))
         startBtn = button("Mulai terjemahan live") { startTranslator() }
         stopBtn = button("Hentikan") {
@@ -207,16 +230,24 @@ class MainActivity : Activity() {
     // ---------------- Pengaturan ----------------
 
     private fun loadPrefs() {
+        loading = true
+        if (Prefs.lang(this) == Prefs.LANG_KO) rbKo.isChecked = true else rbJa.isChecked = true
         if (Prefs.mode(this) == Prefs.MODE_GEMINI) rbGemini.isChecked = true else rbOffline.isChecked = true
         keyInput.setText(Prefs.geminiKey(this))
         modelInput.setText(Prefs.geminiModel(this))
         updateModeUi()
+        loading = false
     }
 
     private fun savePrefs() {
+        if (loading) return // jangan timpa pengaturan saat sedang memuatnya
         val mode = if (rbGemini.isChecked) Prefs.MODE_GEMINI else Prefs.MODE_OFFLINE
-        Prefs.save(this, mode, keyInput.text.toString(), modelInput.text.toString())
+        Prefs.save(this, mode, selectedLang(), keyInput.text.toString(), modelInput.text.toString())
     }
+
+    private fun selectedLang() = if (rbKo.isChecked) Prefs.LANG_KO else Prefs.LANG_JA
+
+    private fun langName() = if (selectedLang() == Prefs.LANG_KO) "Korea" else "Jepang"
 
     private fun updateModeUi() {
         geminiSection.visibility = if (rbGemini.isChecked) View.VISIBLE else View.GONE
@@ -241,7 +272,7 @@ class MainActivity : Activity() {
         testStatus.setTextColor(Color.GRAY)
         scope.launch {
             try {
-                val reply = GeminiEngine(key, Prefs.geminiModel(this@MainActivity)).test()
+                val reply = GeminiEngine(key, Prefs.geminiModel(this@MainActivity), selectedLang()).test()
                 setStatus(testStatus, true, "API key berfungsi. Jawaban tes: ${reply.take(60)}", "")
             } catch (e: GeminiEngine.QuotaException) {
                 setStatus(testStatus, false, "", "Key benar, tapi kuota sedang habis/terbatas: ${e.message?.take(120)}")
@@ -254,9 +285,13 @@ class MainActivity : Activity() {
     // ---------------- Model offline ----------------
 
     private fun checkModels() {
+        val lang = selectedLang()
+        val name = langName()
         scope.launch {
-            modelsReady = runCatching { OfflineEngine.modelsReady() }.getOrDefault(false)
-            setStatus(modelStatus, modelsReady, "Model siap (bisa dipakai tanpa internet)", "Model belum diunduh")
+            val ready = runCatching { OfflineEngine.modelsReady(lang) }.getOrDefault(false)
+            if (lang != selectedLang()) return@launch // bahasa sudah diganti lagi, hasil ini basi
+            modelsReady = ready
+            setStatus(modelStatus, modelsReady, "Model $name siap (bisa dipakai tanpa internet)", "Model $name belum diunduh")
             downloadBtn.visibility = if (modelsReady) View.GONE else View.VISIBLE
         }
     }
@@ -266,7 +301,7 @@ class MainActivity : Activity() {
         downloadBtn.text = "Mengunduh…"
         scope.launch {
             try {
-                OfflineEngine.downloadModels()
+                OfflineEngine.downloadModels(selectedLang())
                 checkModels()
             } catch (e: Exception) {
                 toast("Gagal mengunduh: ${e.message}")
@@ -290,7 +325,7 @@ class MainActivity : Activity() {
             return
         }
         if (!rbGemini.isChecked && !modelsReady) {
-            toast("Unduh model offline dulu (langkah 3)")
+            toast("Unduh model offline ${langName()} dulu (langkah 3)")
             return
         }
         if (rbGemini.isChecked && !modelsReady) {
@@ -311,7 +346,7 @@ class MainActivity : Activity() {
             .putExtra(TranslatorService.EXTRA_RESULT_CODE, resultCode)
             .putExtra(TranslatorService.EXTRA_RESULT_DATA, data)
         startForegroundService(svc)
-        toast("Siap! Buka Chrome dan mulai baca")
+        toast(if (selectedLang() == Prefs.LANG_KO) "Siap! Buka Weverse dan mulai baca" else "Siap! Buka Chrome dan mulai baca")
         moveTaskToBack(true)
     }
 

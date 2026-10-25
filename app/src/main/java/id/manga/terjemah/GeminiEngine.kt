@@ -21,8 +21,13 @@ import kotlin.math.roundToInt
 /**
  * Mode online: tangkapan layar dikirim ke Gemini (Google AI Studio, ada tier gratis).
  * Gemini membaca teks (termasuk vertikal) sekaligus menerjemahkan sesuai konteks.
+ * Bahasa sumber: Jepang (manga) atau Korea (Weverse dan media sosial lain).
  */
-class GeminiEngine(private val apiKey: String, private val model: String) {
+class GeminiEngine(
+    private val apiKey: String,
+    private val model: String,
+    private val lang: String = Prefs.LANG_JA,
+) {
 
     /** Kuota (gratis) habis atau terlalu banyak permintaan -> HTTP 429. */
     class QuotaException(msg: String) : IOException(msg)
@@ -55,7 +60,7 @@ class GeminiEngine(private val apiKey: String, private val model: String) {
                         .put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP))
                 )
             )
-            .put(JSONObject().put("text", PROMPT))
+            .put(JSONObject().put("text", if (lang == Prefs.LANG_KO) PROMPT_KO else PROMPT_JA))
 
         val body = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
@@ -73,7 +78,12 @@ class GeminiEngine(private val apiKey: String, private val model: String) {
         val body = JSONObject().put(
             "contents", JSONArray().put(
                 JSONObject().put("role", "user").put(
-                    "parts", JSONArray().put(JSONObject().put("text", "Terjemahkan ke bahasa Indonesia: ありがとう"))
+                    "parts", JSONArray().put(
+                        JSONObject().put(
+                            "text",
+                            "Terjemahkan ke bahasa Indonesia: " + if (lang == Prefs.LANG_KO) "고마워요" else "ありがとう"
+                        )
+                    )
                 )
             )
         )
@@ -151,7 +161,7 @@ class GeminiEngine(private val apiKey: String, private val model: String) {
         private const val BASE = "https://generativelanguage.googleapis.com/v1beta/models"
         private const val MAX_SIDE = 1600f
 
-        private val PROMPT = """
+        private val PROMPT_JA = """
             You are an expert manga translator (Japanese -> Indonesian).
             The image is a phone screenshot of a manga page shown in a web browser.
 
@@ -171,6 +181,36 @@ class GeminiEngine(private val apiKey: String, private val model: String) {
             [{"box_2d":[ymin,xmin,ymax,xmax],"jp":"original Japanese","id":"terjemahan Indonesia"}]
             box_2d must tightly cover the ORIGINAL Japanese text, normalized to 0-1000.
             Return [] if there is no dialogue.
+        """.trimIndent()
+
+        private val PROMPT_KO = """
+            You are an expert Korean -> Indonesian translator for K-pop fan platforms
+            such as Weverse. The image is a phone screenshot of a social app or web page.
+
+            Find every piece of Korean text written by people: artist posts, fan posts,
+            comments, artist replies, live-stream chat, notices, captions, and Korean text
+            inside photos or images.
+            Treat one post, one comment or one chat message as ONE item, even when it wraps
+            over several lines. Never merge two different comments or messages into one item.
+
+            Do NOT include:
+            - app or website interface text: buttons, tabs, menus, like/comment counts,
+              timestamps, "translate"/"see translation" links, input placeholders
+            - usernames or nicknames standing alone, and lines that are only hashtags
+            - text that is not Korean (English, Indonesian, Japanese, ...), including the
+              app's own translation shown under a post
+
+            Translate into natural, casual Indonesian the way Indonesian K-pop fans write.
+            Keep the writer's tone: warm, playful, aegyo, teasing, formal notice, etc.
+            Keep names of people, groups and fandoms in their usual romanized form.
+            Keep fan address terms romanized: oppa, unnie, hyung, noona, sunbae, maknae.
+            Internet slang: ㅋㅋㅋ -> wkwk, ㅎㅎ -> hehe, ㅠㅠ/ㅜㅜ stay as ㅠㅠ; keep emoji.
+            Do not add explanations or notes. Keep the translation concise.
+
+            Return ONLY a JSON array, in reading order (top to bottom):
+            [{"box_2d":[ymin,xmin,ymax,xmax],"src":"original Korean","id":"terjemahan Indonesia"}]
+            box_2d must tightly cover the ORIGINAL Korean text of that item, normalized to 0-1000.
+            Return [] if there is no Korean text.
         """.trimIndent()
     }
 }

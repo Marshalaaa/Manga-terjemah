@@ -91,7 +91,8 @@ class TranslatorService : Service() {
     private lateinit var wm: WindowManager
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var engine: OfflineEngine? = null
+    /** Mesin offline per bahasa sumber, dibuat saat pertama dipakai (main thread). */
+    private val engines = HashMap<String, OfflineEngine>()
 
     // Mode online (main thread)
     private var gemini: GeminiEngine? = null
@@ -160,7 +161,6 @@ class TranslatorService : Service() {
         }
 
         try {
-            engine = OfflineEngine()
             computeScreenSize()
             addOverlayWindow()   // ditambahkan dulu supaya tombol 訳 selalu di atasnya
             showBubble()
@@ -322,15 +322,17 @@ class TranslatorService : Service() {
         if (state != State.MOVING) return
         val sigNow = lastSig
         val mode = Prefs.mode(this)
+        val lang = Prefs.lang(this)
+        val cacheKey = "$mode|$lang" // hasil Jepang & Korea disimpan terpisah
 
         // Layar ini sudah pernah diterjemahkan? Pakai hasil lama (hemat kuota & instan).
         if (sigNow != null) {
             val hit = resultCache.firstOrNull {
-                it.mode == mode && FrameSignature.diff(it.sig, sigNow, null) < CACHE_MATCH
+                it.mode == cacheKey && FrameSignature.diff(it.sig, sigNow, null) < CACHE_MATCH
             }
             if (hit != null) {
                 state = State.PROCESSING
-                onResult(hit.boxes, sigNow, mode)
+                onResult(hit.boxes, sigNow, cacheKey)
                 return
             }
         }
@@ -345,23 +347,23 @@ class TranslatorService : Service() {
 
         scope.launch {
             val boxes = try {
-                translateFrame(bmp, mode)
+                translateFrame(bmp, mode, lang)
             } catch (e: Exception) {
                 errorToast(e)
                 emptyList()
             } finally {
                 bmp.recycle()
             }
-            ch.post { onResult(boxes, sigAtCapture, mode) }
+            ch.post { onResult(boxes, sigAtCapture, cacheKey) }
         }
     }
 
     /** Main thread. Mode Gemini dulu; kalau gagal/kuota habis, otomatis pakai offline. */
-    private suspend fun translateFrame(bmp: Bitmap, mode: String): List<TextBox> {
+    private suspend fun translateFrame(bmp: Bitmap, mode: String, lang: String): List<TextBox> {
         val exclude = bubbleRect()
         val now = SystemClock.uptimeMillis()
         if (mode == Prefs.MODE_GEMINI && now >= geminiBlockedUntil) {
-            val g = geminiEngine()
+            val g = geminiEngine(lang)
             if (g != null) {
                 try {
                     return g.translate(bmp, exclude)
@@ -376,16 +378,17 @@ class TranslatorService : Service() {
                 }
             }
         }
-        return engine?.translate(bmp, exclude) ?: emptyList()
+        val offline = engines.getOrPut(lang) { OfflineEngine(lang) }
+        return offline.translate(bmp, exclude)
     }
 
-    private fun geminiEngine(): GeminiEngine? {
+    private fun geminiEngine(lang: String): GeminiEngine? {
         val key = Prefs.geminiKey(this)
         if (key.isBlank()) return null
         val model = Prefs.geminiModel(this)
-        val cfg = "$model|${key.hashCode()}"
+        val cfg = "$model|$lang|${key.hashCode()}"
         if (gemini == null || geminiConfig != cfg) {
-            gemini = GeminiEngine(key, model)
+            gemini = GeminiEngine(key, model, lang)
             geminiConfig = cfg
         }
         return gemini
@@ -565,8 +568,8 @@ class TranslatorService : Service() {
         imageReader = null
         projection?.stop()
         projection = null
-        engine?.close()
-        engine = null
+        engines.values.forEach { it.close() }
+        engines.clear()
         super.onDestroy()
     }
 

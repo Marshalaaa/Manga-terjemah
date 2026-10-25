@@ -5,6 +5,16 @@ teks Jepang di layar otomatis ditimpa kotak terjemahan bahasa Indonesia. Saat ka
 lagi, kotaknya hilang dan akan muncul lagi di posisi baru ketika layar diam.
 Semua berjalan **offline di HP** (Google ML Kit), gratis, tanpa API key.
 
+## Bahasa Korea (Weverse, webtoon, media sosial)
+
+Di layar utama pilih **Korea – Weverse, webtoon, media sosial**. Pilihan ini bisa diganti kapan saja,
+juga saat terjemahan live sedang berjalan.
+- **Mode Gemini (disarankan):** postingan artis, komentar, balasan, dan chat live dibaca per item,
+  lalu diterjemahkan dengan gaya bahasa fans Indonesia. Nama, sapaan (oppa, unnie, hyung) dan emoji
+  dipertahankan; ㅋㅋㅋ jadi "wkwk". Tombol, jumlah like, waktu posting, dan terjemahan bawaan Weverse dilewati.
+- **Mode offline:** ML Kit Korea. Tekan **Unduh model** lagi setelah memilih Korea (model terpisah dari Jepang).
+- Jalan di aplikasi Weverse maupun weverse.io di Chrome, karena yang dibaca adalah layar.
+
 ## Mode online: Gemini (disarankan)
 
 Mode ini jauh lebih akurat, terutama untuk teks vertikal dan bahasa gaul.
