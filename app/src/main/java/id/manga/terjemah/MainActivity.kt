@@ -19,6 +19,8 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -37,6 +39,13 @@ class MainActivity : Activity() {
     private lateinit var modelStatus: TextView
     private lateinit var downloadBtn: Button
     private lateinit var glosariumInput: EditText
+    private lateinit var rbGemini: RadioButton
+    private lateinit var rbOffline: RadioButton
+    private lateinit var geminiSection: LinearLayout
+    private lateinit var keyInput: EditText
+    private lateinit var modelInput: EditText
+    private lateinit var testStatus: TextView
+    private var loading = false
     private lateinit var kamusStatus: TextView
     private lateinit var startBtn: Button
     private lateinit var liveStatus: TextView
@@ -52,7 +61,13 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildUi())
+        loading = true
         glosariumInput.setText(Prefs.glosarium(this))
+        if (Prefs.mode(this) == Prefs.MODE_GEMINI) rbGemini.isChecked = true else rbOffline.isChecked = true
+        keyInput.setText(Prefs.geminiKey(this))
+        modelInput.setText(Prefs.geminiModel(this))
+        updateModeUi()
+        loading = false
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -73,6 +88,7 @@ class MainActivity : Activity() {
     override fun onPause() {
         liveStatus.removeCallbacks(statusTicker)
         saveGlosarium() // langsung dipakai penerjemah yang sedang berjalan
+        saveMode()
         TranslatorService.uiOpen = false
         super.onPause()
     }
@@ -97,7 +113,7 @@ class MainActivity : Activity() {
             setTextColor(Color.parseColor("#E8453C"))
         })
         root.addView(note(
-            "Terjemahan live Jepang → Indonesia, sepenuhnya offline. Scroll seperti biasa; begitu kamu " +
+            "Terjemahan live Jepang → Indonesia. Scroll seperti biasa; begitu kamu " +
                 "berhenti sebentar, teks Jepang di layar otomatis ditimpa terjemahan."
         ))
 
@@ -111,8 +127,52 @@ class MainActivity : Activity() {
             )
         })
 
+        // Mode
+        root.addView(header("Mode terjemahan"))
+        rbGemini = RadioButton(this).apply {
+            id = View.generateViewId()
+            text = "Online – Gemini (jauh lebih akurat, gratis dengan kuota harian)"
+        }
+        rbOffline = RadioButton(this).apply {
+            id = View.generateViewId()
+            text = "Offline – ML Kit + kamus (tanpa internet, kualitas standar)"
+        }
+        root.addView(RadioGroup(this).apply {
+            addView(rbGemini)
+            addView(rbOffline)
+            setOnCheckedChangeListener { _, _ ->
+                updateModeUi()
+                saveMode()
+            }
+        })
+        geminiSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        geminiSection.addView(note(
+            "Buat API key gratis di Google AI Studio (login akun Google → Create API key), " +
+                "lalu tempel di bawah. Jangan bagikan key ini ke siapa pun."
+        ))
+        geminiSection.addView(button("Buka Google AI Studio") {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey")))
+        })
+        keyInput = EditText(this).apply {
+            hint = "Tempel API key Gemini di sini"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine()
+        }
+        geminiSection.addView(keyInput)
+        geminiSection.addView(note("Model (biarkan default kalau ragu):"))
+        modelInput = EditText(this).apply {
+            hint = Prefs.DEFAULT_GEMINI_MODEL
+            setSingleLine()
+        }
+        geminiSection.addView(modelInput)
+        testStatus = note("")
+        geminiSection.addView(button("Tes API key") { testKey() })
+        geminiSection.addView(testStatus)
+        root.addView(geminiSection)
+
         // Langkah 2
-        root.addView(header("2. Model terjemahan"))
+        root.addView(header("2. Model offline (cadangan)"))
+        root.addView(note("Dipakai di mode offline, dan otomatis dipakai kalau kuota Gemini habis atau internet putus."))
         modelStatus = note("Memeriksa…")
         root.addView(modelStatus)
         downloadBtn = button("Unduh model (sekali saja, ±30 MB, pakai Wi-Fi)") { downloadModels() }
@@ -121,7 +181,7 @@ class MainActivity : Activity() {
         // Langkah 3
         root.addView(header("3. Daftar nama (opsional)"))
         root.addView(note(
-            "Nama karakter & istilah supaya tidak diterjemahkan jadi kata biasa. " +
+            "Nama karakter & istilah supaya tidak diterjemahkan jadi kata biasa (Gemini & offline). " +
                 "Satu per baris, format: Jepang = Indonesia. Bisa diganti tiap ganti judul manga."
         ))
         glosariumInput = EditText(this).apply {
@@ -226,6 +286,37 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun updateModeUi() {
+        geminiSection.visibility = if (rbGemini.isChecked) View.VISIBLE else View.GONE
+    }
+
+    private fun saveMode() {
+        if (loading || !::keyInput.isInitialized) return
+        val mode = if (rbGemini.isChecked) Prefs.MODE_GEMINI else Prefs.MODE_OFFLINE
+        Prefs.saveGemini(this, mode, keyInput.text.toString(), modelInput.text.toString())
+    }
+
+    private fun testKey() {
+        saveMode()
+        val key = Prefs.geminiKey(this)
+        if (key.isBlank()) {
+            setStatus(testStatus, false, "", "API key masih kosong")
+            return
+        }
+        testStatus.text = "Mengetes…"
+        testStatus.setTextColor(Color.GRAY)
+        scope.launch {
+            try {
+                val reply = GeminiEngine(key, Prefs.geminiModel(this@MainActivity)).test()
+                setStatus(testStatus, true, "API key berfungsi. Jawaban tes: ${reply.take(60)}", "")
+            } catch (e: GeminiEngine.QuotaException) {
+                setStatus(testStatus, false, "", "Key benar, tapi kuota sedang habis/terbatas: ${e.message?.take(120)}")
+            } catch (e: Exception) {
+                setStatus(testStatus, false, "", "Gagal: ${e.message?.take(160)}")
+            }
+        }
+    }
+
     private fun saveGlosarium() {
         if (::glosariumInput.isInitialized) Kamus.setGlosarium(this, glosariumInput.text.toString())
     }
@@ -260,13 +351,21 @@ class MainActivity : Activity() {
 
     private fun startTranslator() {
         saveGlosarium()
+        saveMode()
         if (!Settings.canDrawOverlays(this)) {
             toast("Izinkan dulu tampil di atas aplikasi lain (langkah 1)")
             return
         }
-        if (!modelsReady) {
-            toast("Unduh model dulu (langkah 2)")
+        if (rbGemini.isChecked && keyInput.text.isBlank()) {
+            toast("Isi API key Gemini dulu, atau pilih mode offline")
             return
+        }
+        if (!rbGemini.isChecked && !modelsReady) {
+            toast("Unduh model offline dulu (langkah 2)")
+            return
+        }
+        if (rbGemini.isChecked && !modelsReady) {
+            toast("Tips: unduh juga model offline sebagai cadangan kalau kuota Gemini habis")
         }
         val mpm = getSystemService(MediaProjectionManager::class.java)
         startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE)

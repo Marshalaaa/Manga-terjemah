@@ -56,6 +56,9 @@ object Kamus {
         return null
     }
 
+    /** Daftar nama saat ini (Jepang, Indonesia), untuk prompt Gemini. */
+    fun daftarNama(): List<Pair<String, String>> = glosarium
+
     /** Ganti nama/istilah dari Daftar nama supaya tidak diterjemahkan ML Kit jadi kata biasa. */
     fun applyGlosarium(jp: String): String {
         var s = jp
