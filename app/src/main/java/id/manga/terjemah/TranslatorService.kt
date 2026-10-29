@@ -93,6 +93,11 @@ class TranslatorService : Service() {
         /** Layar aplikasi ini sendiri sedang terbuka -> jangan terjemahkan (isinya ada teks Jepang). */
         @Volatile
         var uiOpen = false
+
+        /** Status terakhir untuk diagnosa (ditampilkan di notifikasi & layar utama). */
+        @Volatile
+        var lastStatus = "Belum berjalan"
+            private set
     }
 
     private enum class State { MOVING, PROCESSING, SHOWING, PAUSED }
@@ -131,6 +136,8 @@ class TranslatorService : Service() {
     private var overlay: TranslationOverlayView? = null
     private var paused = false
     private var lastErrorToast = 0L
+    private var notifBuilder: NotificationCompat.Builder? = null
+    private val timeFmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -170,7 +177,9 @@ class TranslatorService : Service() {
             showBubble()
             setupCapture(code, data)
             isRunning = true
+            status("Berjalan. Buka manga lalu diam sebentar.")
         } catch (e: Exception) {
+            status("Gagal memulai: ${e.message}")
             toast("Gagal memulai: ${e.message}")
             stopSelf()
         }
@@ -194,14 +203,16 @@ class TranslatorService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val notif: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentTitle("Manga Terjemah (live) aktif")
             .setContentText("Ketuk 訳 untuk jeda. Tekan lama 訳 untuk mengoreksi terjemahan.")
             .setContentIntent(openIntent)
             .addAction(0, "Berhenti", stopIntent)
             .setOngoing(true)
-            .build()
+            .setOnlyAlertOnce(true)
+        notifBuilder = builder
+        val notif: Notification = builder.build()
 
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
@@ -325,6 +336,7 @@ class TranslatorService : Service() {
     private fun onStable() {
         if (state != State.MOVING) return
         if (uiOpen) { // layar Koreksi/pengaturan sedang dibuka: tunggu sampai ditutup
+            if (!lastStatus.startsWith("Menunggu")) status("Menunggu: layar Manga Terjemah sedang terbuka")
             main.post { setOverlayVisible(false) }
             ch.postDelayed(stableCheck, SETTLE_MS)
             return
@@ -349,6 +361,7 @@ class TranslatorService : Service() {
 
         val bmp = grabFrame()
         if (bmp == null) {
+            if (lastStatus != "Belum ada gambar layar") status("Belum ada gambar layar")
             ch.postDelayed(stableCheck, SETTLE_MS) // belum ada frame
             return
         }
@@ -358,8 +371,20 @@ class TranslatorService : Service() {
 
         scope.launch {
             val boxes = try {
-                engine?.translate(bmp, bubbleRect()) ?: emptyList()
+                if (isBlack(bmp)) {
+                    status("Layar terekam HITAM. Rekam layar diblokir, atau yang dipilih bukan \"seluruh layar\".")
+                    emptyList()
+                } else {
+                    val eng = engine
+                    val r = eng?.translate(bmp, bubbleRect()) ?: emptyList()
+                    if (eng != null) status(
+                        "Layar ${bmp.width}×${bmp.height}: ${eng.lastLines} baris teks terbaca, " +
+                            "${eng.lastJapanese} teks Jepang, ${r.size} diterjemahkan"
+                    )
+                    r
+                }
             } catch (e: Exception) {
+                status("Error: ${e.message ?: e.javaClass.simpleName}")
                 errorToast(e)
                 emptyList()
             } finally {
@@ -527,6 +552,7 @@ class TranslatorService : Service() {
         (bubble?.background as? GradientDrawable)
             ?.setColor(Color.parseColor(if (paused) "#888888" else "#E8453C"))
         bubble?.alpha = if (paused) 0.6f else 1f
+        status(if (paused) "Dijeda (ketuk 訳 untuk lanjut)" else "Lanjut")
         if (paused) {
             setOverlayVisible(false)
             ch.post {
@@ -552,6 +578,7 @@ class TranslatorService : Service() {
 
     override fun onDestroy() {
         isRunning = false
+        lastStatus = "Berhenti pada ${timeFmt.format(java.util.Date())}. Sebelumnya: $lastStatus"
         scope.cancel()
         overlay?.let { runCatching { wm.removeView(it) } }
         overlay = null
@@ -576,6 +603,30 @@ class TranslatorService : Service() {
         engine?.close()
         engine = null
         super.onDestroy()
+    }
+
+    /** Simpan status diagnosa & tampilkan di notifikasi. Aman dipanggil dari thread mana pun. */
+    private fun status(text: String) {
+        val line = "${timeFmt.format(java.util.Date())}  $text"
+        lastStatus = line
+        main.post {
+            val b = notifBuilder ?: return@post
+            b.setContentText(line).setStyle(NotificationCompat.BigTextStyle().bigText(line))
+            runCatching { getSystemService(NotificationManager::class.java).notify(NOTIF_ID, b.build()) }
+        }
+    }
+
+    /** Hampir semua piksel hitam -> rekam layar diblokir (FLAG_SECURE) atau tidak menangkap apa-apa. */
+    private fun isBlack(bmp: Bitmap): Boolean {
+        var dark = 0
+        var total = 0
+        val n = 24
+        for (iy in 0 until n) for (ix in 0 until n) {
+            val c = bmp.getPixel((bmp.width - 1) * ix / (n - 1), (bmp.height - 1) * iy / (n - 1))
+            if (Color.red(c) + Color.green(c) + Color.blue(c) < 24) dark++
+            total++
+        }
+        return dark * 100 >= total * 98
     }
 
     private fun errorToast(e: Exception) {

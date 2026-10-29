@@ -39,6 +39,13 @@ class MainActivity : Activity() {
     private lateinit var glosariumInput: EditText
     private lateinit var kamusStatus: TextView
     private lateinit var startBtn: Button
+    private lateinit var liveStatus: TextView
+    private val statusTicker = object : Runnable {
+        override fun run() {
+            liveStatus.text = "Status: ${TranslatorService.lastStatus}"
+            liveStatus.postDelayed(this, 1000)
+        }
+    }
     private lateinit var stopBtn: Button
     private var modelsReady = false
 
@@ -59,9 +66,12 @@ class MainActivity : Activity() {
         refreshStatus()
         checkModels()
         refreshKamus()
+        liveStatus.removeCallbacks(statusTicker)
+        statusTicker.run()
     }
 
     override fun onPause() {
+        liveStatus.removeCallbacks(statusTicker)
         saveGlosarium() // langsung dipakai penerjemah yang sedang berjalan
         TranslatorService.uiOpen = false
         super.onPause()
@@ -146,6 +156,8 @@ class MainActivity : Activity() {
         }
         root.addView(startBtn)
         root.addView(stopBtn)
+        liveStatus = note("").apply { setTextColor(Color.DKGRAY) }
+        root.addView(liveStatus)
 
         root.addView(header("Tips"))
         root.addView(note(

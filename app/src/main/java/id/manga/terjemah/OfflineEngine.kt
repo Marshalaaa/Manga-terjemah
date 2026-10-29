@@ -39,6 +39,14 @@ class OfflineEngine(context: Context) {
     private val app = context.applicationContext
     private var cacheVersion = -1
 
+    /** Angka diagnosa dari layar terakhir (untuk status di notifikasi & layar utama). */
+    var lastLines = 0
+        private set
+    var lastGroups = 0
+        private set
+    var lastJapanese = 0
+        private set
+
     private enum class Orient { V, H, N } // vertikal, horizontal, netral (1 huruf / kotak)
 
     private class Frag(val rect: Rect, val text: String) {
@@ -67,9 +75,13 @@ class OfflineEngine(context: Context) {
         }
         val result = recognizer.process(InputImage.fromBitmap(screen, 0)).await()
         val frags = toFrags(result, exclude, 0, 0, 1f)
+        val groups = groupFrags(frags)
+        lastLines = frags.size
+        lastGroups = groups.size
+        lastJapanese = 0
 
         val out = mutableListOf<TextBox>()
-        for (group in groupFrags(frags)) {
+        for (group in groups) {
             val rect = union(group)
             var jp = readGroup(group)
 
@@ -81,6 +93,7 @@ class OfflineEngine(context: Context) {
 
             jp = cleanup(jp)
             if (!isMostlyJapanese(jp)) continue // lewati tombol/UI situs, angka, huruf tunggal
+            lastJapanese++
             if (isSoundEffect(jp, screen, rect, group)) continue // efek suara dibiarkan asli
             val id = Kamus.lookup(jp)
                 ?: cache[jp]
