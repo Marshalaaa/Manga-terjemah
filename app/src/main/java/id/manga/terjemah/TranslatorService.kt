@@ -114,6 +114,7 @@ class TranslatorService : Service() {
     private var geminiConfig: String? = null
     private var geminiBlockedUntil = 0L
     private var lastQuotaToast = 0L
+    private var blockedToastShown = false
 
     /** Hasil terjemahan terakhir per "sidik jari" layar — layar yang sama tidak diproses ulang. */
     private class Cached(val sig: IntArray, val mode: String, val boxes: List<TextBox>)
@@ -417,6 +418,12 @@ class TranslatorService : Service() {
                         .map { b -> Kamus.koreksiUntuk(b.source)?.let { b.copy(text = it) } ?: b }
                     status("Gemini: ${boxes.size} teks diterjemahkan (layar ${bmp.width}×${bmp.height})")
                     return boxes
+                } catch (e: GeminiEngine.BlockedException) {
+                    status("Gemini menolak layar ini (${e.reason}), dialihkan ke offline")
+                    if (!blockedToastShown) {
+                        blockedToastShown = true
+                        toast("Gemini menolak sebagian layar (mis. adegan sadis). Layar itu diterjemahkan offline.")
+                    }
                 } catch (e: GeminiEngine.QuotaException) {
                     geminiBlockedUntil = now + QUOTA_COOLDOWN_MS
                     status("Kuota Gemini habis: ${e.message?.take(80)}. Pakai offline 10 menit.")

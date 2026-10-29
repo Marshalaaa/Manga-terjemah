@@ -27,6 +27,9 @@ class GeminiEngine(private val apiKey: String, private val model: String) {
     /** Kuota (gratis) habis atau terlalu banyak permintaan -> HTTP 429. */
     class QuotaException(msg: String) : IOException(msg)
 
+    /** Gemini menolak layar ini (filter keamanan, mis. adegan sadis). Layar ini dialihkan ke offline. */
+    class BlockedException(val reason: String) : IOException("Gemini menolak layar ini ($reason)")
+
     /** @param names Daftar nama dari pengaturan: dipaksa diterjemahkan persis seperti ini. */
     suspend fun translate(
         screen: Bitmap,
@@ -64,6 +67,7 @@ class GeminiEngine(private val apiKey: String, private val model: String) {
 
         val body = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
+            .put("safetySettings", SAFETY_OFF)
             .put(
                 "generationConfig", JSONObject()
                     .put("responseMimeType", "application/json")
@@ -112,15 +116,22 @@ class GeminiEngine(private val apiKey: String, private val model: String) {
             val candidates = json.optJSONArray("candidates")
             if (candidates == null || candidates.length() == 0) {
                 val reason = json.optJSONObject("promptFeedback")?.optString("blockReason")
-                throw IOException("Gemini tidak membalas" + (reason?.let { " ($it)" } ?: ""))
+                if (!reason.isNullOrBlank()) throw BlockedException(reason)
+                throw IOException("Gemini tidak membalas")
             }
+            val cand = candidates.getJSONObject(0)
+            val finish = cand.optString("finishReason")
             val out = StringBuilder()
-            val partsArr = candidates.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts")
-                ?: return ""
+            val partsArr = cand.optJSONObject("content")?.optJSONArray("parts")
+            if (partsArr == null) {
+                if (finish in BLOCK_REASONS) throw BlockedException(finish)
+                return ""
+            }
             for (i in 0 until partsArr.length()) {
                 val p = partsArr.getJSONObject(i)
                 if (!p.optBoolean("thought", false)) out.append(p.optString("text"))
             }
+            if (out.isBlank() && finish in BLOCK_REASONS) throw BlockedException(finish)
             return out.toString()
         } finally {
             conn.disconnect()
@@ -163,6 +174,20 @@ class GeminiEngine(private val apiKey: String, private val model: String) {
         private const val BASE = "https://generativelanguage.googleapis.com/v1beta/models"
         private const val MAX_SIDE = 1600f
 
+        private val BLOCK_REASONS = setOf(
+            "SAFETY", "PROHIBITED_CONTENT", "IMAGE_SAFETY", "BLOCKLIST", "SPII", "RECITATION", "OTHER"
+        )
+
+        /** Filter yang bisa diatur dimatikan (manga fiksi: kekerasan/gore tetap diterjemahkan). */
+        private val SAFETY_OFF: JSONArray = JSONArray().apply {
+            for (cat in listOf(
+                "HARM_CATEGORY_HARASSMENT",
+                "HARM_CATEGORY_HATE_SPEECH",
+                "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "HARM_CATEGORY_DANGEROUS_CONTENT",
+            )) put(JSONObject().put("category", cat).put("threshold", "OFF"))
+        }
+
         private val PROMPT = """
             You are an expert manga translator (Japanese -> Indonesian).
             The image is a phone screenshot of a manga page shown in a web browser.
@@ -174,6 +199,9 @@ class GeminiEngine(private val apiKey: String, private val model: String) {
             Do NOT include:
             - sound effects / onomatopoeia drawn on the artwork (e.g. ドドド, ガシャン, ザワ, ドキッ)
             - website or browser interface text (menus, buttons, page numbers)
+
+            This is a published fictional manga, which may contain violence, gore or harsh language.
+            Translate such dialogue faithfully, without softening or skipping it.
 
             Translate each item into natural, casual Indonesian that matches the character's tone
             and the scene's context. Keep names; keep honorifics (-san, -kun, -chan, -sama, senpai).
