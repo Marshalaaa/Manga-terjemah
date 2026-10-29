@@ -78,12 +78,21 @@ class TranslatorService : Service() {
         /** Dua layar dianggap sama kalau <1% grid berbeda. */
         private const val CACHE_MATCH = 0.01f
         private const val CACHE_SIZE = 40
-        /** Setelah kuota Gemini habis (HTTP 429), pakai offline selama ini sebelum mencoba lagi. */
-        private const val QUOTA_COOLDOWN_MS = 10 * 60 * 1000L
+        /** Tekan lama tombol 訳 selama ini untuk membuka layar Koreksi. */
+        private const val LONG_PRESS_MS = 600L
 
         @Volatile
         var isRunning = false
             private set
+
+        /** Terjemahan yang terakhir tampil di layar (untuk layar Koreksi). */
+        @Volatile
+        var lastShown: List<TextBox> = emptyList()
+            private set
+
+        /** Layar aplikasi ini sendiri sedang terbuka -> jangan terjemahkan (isinya ada teks Jepang). */
+        @Volatile
+        var uiOpen = false
     }
 
     private enum class State { MOVING, PROCESSING, SHOWING, PAUSED }
@@ -91,18 +100,12 @@ class TranslatorService : Service() {
     private lateinit var wm: WindowManager
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    /** Mesin offline per bahasa sumber, dibuat saat pertama dipakai (main thread). */
-    private val engines = HashMap<String, OfflineEngine>()
+    private var engine: OfflineEngine? = null
 
-    // Mode online (main thread)
-    private var gemini: GeminiEngine? = null
-    private var geminiConfig: String? = null
-    private var geminiBlockedUntil = 0L
-    private var lastQuotaToast = 0L
-
-    /** Hasil terjemahan terakhir per "sidik jari" layar — layar yang sama tidak dikirim ulang. */
-    private class Cached(val sig: IntArray, val mode: String, val boxes: List<TextBox>)
+    /** Hasil terjemahan terakhir per "sidik jari" layar — layar yang sama tidak diproses ulang. */
+    private class Cached(val sig: IntArray, val boxes: List<TextBox>)
     private val resultCache = ArrayDeque<Cached>() // hanya di thread capture
+    private var cacheVersion = -1 // versi Kamus saat cache dibuat
 
     // Rekam layar
     private var projection: MediaProjection? = null
@@ -161,6 +164,7 @@ class TranslatorService : Service() {
         }
 
         try {
+            engine = OfflineEngine(this)
             computeScreenSize()
             addOverlayWindow()   // ditambahkan dulu supaya tombol 訳 selalu di atasnya
             showBubble()
@@ -193,7 +197,7 @@ class TranslatorService : Service() {
         val notif: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentTitle("Manga Terjemah (live) aktif")
-            .setContentText("Berhenti scroll sebentar, terjemahan muncul otomatis. Ketuk 訳 untuk jeda.")
+            .setContentText("Ketuk 訳 untuk jeda. Tekan lama 訳 untuk mengoreksi terjemahan.")
             .setContentIntent(openIntent)
             .addAction(0, "Berhenti", stopIntent)
             .setOngoing(true)
@@ -320,19 +324,25 @@ class TranslatorService : Service() {
 
     private fun onStable() {
         if (state != State.MOVING) return
+        if (uiOpen) { // layar Koreksi/pengaturan sedang dibuka: tunggu sampai ditutup
+            main.post { setOverlayVisible(false) }
+            ch.postDelayed(stableCheck, SETTLE_MS)
+            return
+        }
         val sigNow = lastSig
-        val mode = Prefs.mode(this)
-        val lang = Prefs.lang(this)
-        val cacheKey = "$mode|$lang" // hasil Jepang & Korea disimpan terpisah
 
-        // Layar ini sudah pernah diterjemahkan? Pakai hasil lama (hemat kuota & instan).
+        // Koreksi/daftar nama berubah -> semua hasil lama dibuang.
+        if (cacheVersion != Kamus.version) {
+            resultCache.clear()
+            cacheVersion = Kamus.version
+        }
+
+        // Layar ini sudah pernah diterjemahkan? Pakai hasil lama (instan).
         if (sigNow != null) {
-            val hit = resultCache.firstOrNull {
-                it.mode == cacheKey && FrameSignature.diff(it.sig, sigNow, null) < CACHE_MATCH
-            }
+            val hit = resultCache.firstOrNull { FrameSignature.diff(it.sig, sigNow, null) < CACHE_MATCH }
             if (hit != null) {
                 state = State.PROCESSING
-                onResult(hit.boxes, sigNow, cacheKey)
+                onResult(hit.boxes, sigNow, cacheVersion)
                 return
             }
         }
@@ -344,57 +354,22 @@ class TranslatorService : Service() {
         }
         state = State.PROCESSING
         val sigAtCapture = lastSig
+        val ver = cacheVersion
 
         scope.launch {
             val boxes = try {
-                translateFrame(bmp, mode, lang)
+                engine?.translate(bmp, bubbleRect()) ?: emptyList()
             } catch (e: Exception) {
                 errorToast(e)
                 emptyList()
             } finally {
                 bmp.recycle()
             }
-            ch.post { onResult(boxes, sigAtCapture, cacheKey) }
+            ch.post { onResult(boxes, sigAtCapture, ver) }
         }
     }
 
-    /** Main thread. Mode Gemini dulu; kalau gagal/kuota habis, otomatis pakai offline. */
-    private suspend fun translateFrame(bmp: Bitmap, mode: String, lang: String): List<TextBox> {
-        val exclude = bubbleRect()
-        val now = SystemClock.uptimeMillis()
-        if (mode == Prefs.MODE_GEMINI && now >= geminiBlockedUntil) {
-            val g = geminiEngine(lang)
-            if (g != null) {
-                try {
-                    return g.translate(bmp, exclude)
-                } catch (e: GeminiEngine.QuotaException) {
-                    geminiBlockedUntil = now + QUOTA_COOLDOWN_MS
-                    if (now - lastQuotaToast > QUOTA_COOLDOWN_MS) {
-                        lastQuotaToast = now
-                        toast("Kuota Gemini sedang habis/terbatas. Sementara pakai mode offline, dicoba lagi 10 menit lagi.")
-                    }
-                } catch (e: Exception) {
-                    errorToast(e) // jaringan bermasalah dll -> pakai offline untuk layar ini
-                }
-            }
-        }
-        val offline = engines.getOrPut(lang) { OfflineEngine(lang) }
-        return offline.translate(bmp, exclude)
-    }
-
-    private fun geminiEngine(lang: String): GeminiEngine? {
-        val key = Prefs.geminiKey(this)
-        if (key.isBlank()) return null
-        val model = Prefs.geminiModel(this)
-        val cfg = "$model|$lang|${key.hashCode()}"
-        if (gemini == null || geminiConfig != cfg) {
-            gemini = GeminiEngine(key, model, lang)
-            geminiConfig = cfg
-        }
-        return gemini
-    }
-
-    private fun onResult(boxes: List<TextBox>, sigAtCapture: IntArray?, mode: String) {
+    private fun onResult(boxes: List<TextBox>, sigAtCapture: IntArray?, ver: Int) {
         if (state != State.PROCESSING) return
         val cur = lastSig
         // Layar sudah berubah selama proses -> hasil basi, ulangi.
@@ -407,16 +382,17 @@ class TranslatorService : Service() {
         main.post {
             val rects = overlay?.setBoxes(boxes, screenW) ?: emptyList()
             if (!paused) setOverlayVisible(boxes.isNotEmpty())
+            lastShown = boxes
             val m = FrameSignature.mask(rects, screenW, screenH)
             ch.post {
                 if (state != State.PROCESSING) return@post
                 baselineSig = sigAtCapture
                 mask = m
                 state = State.SHOWING
-                if (sigAtCapture != null &&
-                    resultCache.none { it.mode == mode && FrameSignature.diff(it.sig, sigAtCapture, null) < CACHE_MATCH }
+                if (sigAtCapture != null && ver == Kamus.version &&
+                    resultCache.none { FrameSignature.diff(it.sig, sigAtCapture, null) < CACHE_MATCH }
                 ) {
-                    resultCache.addFirst(Cached(sigAtCapture, mode, boxes))
+                    resultCache.addFirst(Cached(sigAtCapture, boxes))
                     while (resultCache.size > CACHE_SIZE) resultCache.removeLast()
                 }
                 // Kalau ada scroll di sela-sela tadi, langsung tangani.
@@ -490,30 +466,59 @@ class TranslatorService : Service() {
         var startX = 0
         var startY = 0
         var moved = false
+        var longPressed = false
+        val longPress = Runnable {
+            longPressed = true
+            openKoreksi()
+        }
         tv.setOnTouchListener { _, e ->
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = e.rawX; downY = e.rawY
                     startX = lp.x; startY = lp.y
                     moved = false
+                    longPressed = false
+                    main.postDelayed(longPress, LONG_PRESS_MS)
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - downX
                     val dy = e.rawY - downY
-                    if (abs(dx) > dp(8) || abs(dy) > dp(8)) moved = true
-                    if (moved) {
+                    if (abs(dx) > dp(8) || abs(dy) > dp(8)) {
+                        moved = true
+                        main.removeCallbacks(longPress)
+                    }
+                    if (moved && !longPressed) {
                         lp.x = startX + dx.toInt()
                         lp.y = startY + dy.toInt()
                         runCatching { wm.updateViewLayout(tv, lp) }
                     }
                 }
-                MotionEvent.ACTION_UP -> if (!moved) togglePause()
+                MotionEvent.ACTION_UP -> {
+                    main.removeCallbacks(longPress)
+                    if (!moved && !longPressed) togglePause()
+                }
+                MotionEvent.ACTION_CANCEL -> main.removeCallbacks(longPress)
             }
             true
         }
 
         wm.addView(tv, lp)
         bubble = tv
+    }
+
+    /** Tekan lama 訳: buka layar Koreksi untuk terjemahan yang sedang tampil. */
+    private fun openKoreksi() {
+        tvVibrate()
+        runCatching {
+            startActivity(
+                Intent(this, KoreksiActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            )
+        }.onFailure { toast("Gagal membuka layar Koreksi: ${it.message}") }
+    }
+
+    private fun tvVibrate() {
+        bubble?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
     }
 
     /** Ketuk 訳: jeda / lanjutkan terjemahan live. */
@@ -568,8 +573,8 @@ class TranslatorService : Service() {
         imageReader = null
         projection?.stop()
         projection = null
-        engines.values.forEach { it.close() }
-        engines.clear()
+        engine?.close()
+        engine = null
         super.onDestroy()
     }
 

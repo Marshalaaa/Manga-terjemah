@@ -17,6 +17,10 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # Kamus Tatoeba diunduh & disaring otomatis, lalu ikut masuk ke APK.
+      - name: Buat kamus Tatoeba
+        run: python3 scripts/buat_kamus_tatoeba.py app/src/main/assets/tatoeba_ja_id.tsv
+
       - name: Build debug APK
         run: |
           chmod +x gradlew
@@ -26,3 +30,8 @@ jobs:
         with:
           name: MangaTerjemah-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kamus-tatoeba
+          path: app/src/main/assets/tatoeba_ja_id.tsv

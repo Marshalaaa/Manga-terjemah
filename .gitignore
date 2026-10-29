@@ -4,3 +4,7 @@ local.properties
 .idea/
 *.iml
 .DS_Store
+
+# Dibuat otomatis saat build (scripts/buat_kamus_tatoeba.py)
+app/src/main/assets/tatoeba_ja_id.tsv
+__pycache__/

@@ -1,0 +1,306 @@
+# Frasa manga yang sering muncul -> terjemahan Indonesia santai.
+# Format: jepang<TAB>indonesia. Dicocokkan per balon utuh; tanda baca, spasi, ー dobel,
+# dan っ di akhir diabaikan (くそっ = くそ). Baris yang diakhiri ? hanya untuk kalimat tanya.
+# Silakan diubah. Koreksi dari aplikasi selalu lebih diutamakan daripada daftar ini.
+
+# --- Kaget / bertanya ---
+え	Eh?
+えっ？	Eh?!
+は？	Hah?
+はあ？	Hah?!
+なに	Apa?!
+なに？	Apa?
+何？	Apa?
+なんだ	Apa-apaan…
+なんだ？	Apa?
+なんだと	Apa katamu?!
+何だと	Apa katamu?!
+なんで	Kenapa?!
+なんで？	Kenapa?
+何で？	Kenapa?
+どうして	Kenapa…
+どうして？	Kenapa?
+どういうこと	Maksudnya apa?!
+どういうこと？	Maksudnya gimana?
+どういう意味？	Apa maksudnya?
+どうした？	Ada apa?
+どうしたの？	Kamu kenapa?
+どうしよう	Gimana nih…
+どうする？	Terus gimana?
+どこ？	Di mana?
+どこだ	Di mana?!
+誰？	Siapa?
+誰だ	Siapa kau?!
+誰だ？	Siapa kau?
+お前は誰だ	Siapa kau sebenarnya?!
+あなたは誰？	Kamu siapa?
+いつ？	Kapan?
+本当？	Beneran?
+本当に？	Serius?
+ほんと？	Beneran?
+マジか	Serius?!
+マジで？	Serius?!
+本気か？	Kamu serius?
+うそ	Bohong!
+ウソ	Bohong!
+うそでしょ	Bohong, kan?!
+嘘でしょ	Bohong, kan?!
+まさか	Jangan-jangan…
+そんな	Nggak mungkin…
+そんなバカな	Mana mungkin!
+ありえない	Nggak masuk akal!
+信じられない	Aku nggak percaya…
+何だこれ	Apa-apaan ini?!
+なんだこれ	Apa-apaan ini?!
+何これ	Apaan nih?
+なにこれ	Apaan nih?
+あれ？	Lho?
+何してるの？	Kamu lagi ngapain?
+何してる？	Lagi ngapain?
+何をしている	Apa yang kau lakukan?!
+何やってんだ	Kamu ngapain sih?!
+なんでここに	Kenapa kamu di sini?!
+何でここに	Kenapa kamu di sini?!
+
+# --- Seruan ---
+くそ	Sial!
+クソ	Sial!
+ちくしょう	Sialan!
+畜生	Sialan!
+しまった	Gawat!
+やばい	Gawat!
+ヤバい	Gawat!
+まずい	Gawat!
+やった	Berhasil!
+やったぁ	Yeay!
+よし	Oke!
+よっしゃ	Yes!
+すごい	Keren!
+すごーい	Kereeen!
+すげえ	Gila, keren!
+すげー	Gila, keren!
+さすが	Memang hebat!
+かわいい	Imut banget!
+可愛い	Imut banget!
+きれい	Cantik…
+綺麗	Cantik…
+かっこいい	Keren!
+おいしい	Enak!
+美味しい	Enak!
+痛い	Sakit!
+いたい	Aduh, sakit!
+いてえ	Aduh, sakit!
+熱い	Panas!
+寒い	Dingin…
+疲れた	Capek…
+お腹すいた	Lapar…
+眠い	Ngantuk…
+怖い	Takut…
+恥ずかしい	Malu…
+嬉しい	Aku senang!
+楽しい	Seru!
+寂しい	Aku kesepian…
+ずるい	Curang!
+ひどい	Jahat!
+最低	Jahat banget!
+最高	Mantap!
+最高だ	Mantap!
+面白い	Menarik.
+つまらない	Membosankan.
+危ない	Awas!
+助けて	Tolong!
+誰か助けて	Siapa pun, tolong aku!
+おい	Oi!
+ねえ	Hei…
+ほら	Lihat!
+ちょっと	Hei, tunggu!
+あの	Anu…
+あのさ	Eh, dengar…
+えっと	Anu…
+えーと	Anu…
+うーん	Hmm…
+ふーん	Hmm…
+へえ	Hee…
+ふん	Hmph!
+はは	Haha
+ははは	Hahaha
+ふふ	Hehe
+えへへ	Ehehe
+
+# --- Perintah / ajakan ---
+待って	Tunggu!
+ちょっと待って	Tunggu sebentar!
+待て	Tunggu!
+待ってろ	Tunggu aku!
+止まれ	Berhenti!
+やめろ	Hentikan!
+やめて	Hentikan!
+逃げろ	Lari!
+急げ	Cepat!
+早く	Cepat!
+落ち着け	Tenang!
+落ち着いて	Tenang dulu!
+静かに	Ssst, diam!
+黙れ	Diam!
+だまれ	Diam!
+うるさい	Berisik!
+うるせえ	Berisik!
+来い	Sini!
+来るな	Jangan mendekat!
+こっち	Sebelah sini!
+こっちだ	Sini!
+行くぞ	Ayo!
+いくぞ	Ayo!
+行こう	Ayo pergi.
+行け	Maju!
+見て	Lihat!
+見ろ	Lihat!
+聞いて	Dengar!
+聞け	Dengar!
+起きて	Bangun!
+起きろ	Bangun!
+教えて	Kasih tahu aku!
+手伝って	Bantu aku!
+信じて	Percayalah padaku.
+行かないで	Jangan pergi!
+頑張って	Semangat!
+がんばって	Semangat!
+頑張れ	Semangat!
+がんばれ	Semangat!
+任せて	Serahkan padaku!
+任せろ	Serahkan padaku!
+お願い	Kumohon!
+お願いします	Kumohon.
+頼む	Kumohon!
+もう一度	Sekali lagi!
+もう一回	Sekali lagi!
+もういい	Udah, cukup!
+気にするな	Jangan dipikirin.
+気にしないで	Nggak usah dipikirin.
+心配するな	Jangan khawatir.
+心配しないで	Jangan khawatir.
+
+# --- Jawaban ---
+はい	Iya.
+うん	Iya.
+いいえ	Bukan.
+いや	Nggak…
+ううん	Nggak.
+そうか	Begitu, ya.
+そっか	Begitu, ya.
+そうなんだ	Oh, begitu.
+そうだね	Iya, ya.
+そうだな	Benar juga.
+そうですね	Benar juga, ya.
+なるほど	Oh, begitu.
+確かに	Benar juga.
+もちろん	Tentu saja!
+当然	Tentu saja.
+当たり前だ	Ya iyalah!
+わかった	Oke, aku ngerti.
+分かった	Oke, aku ngerti.
+わかりました	Baik, saya mengerti.
+分かりました	Baik, saya mengerti.
+分かってる	Aku tahu.
+わからない	Aku nggak tahu.
+分からない	Aku nggak tahu.
+知らない	Nggak tahu.
+了解	Siap!
+いいよ	Boleh.
+いいね	Bagus!
+だめ	Nggak boleh!
+ダメ	Nggak boleh!
+だめだ	Nggak bisa!
+無理	Nggak mungkin!
+無理だ	Nggak mungkin!
+嫌だ	Nggak mau!
+いやだ	Nggak mau!
+違う	Bukan!
+ちがう	Bukan!
+違います	Bukan.
+そうじゃない	Bukan begitu.
+別に	Nggak ada apa-apa.
+なんでもない	Bukan apa-apa.
+何でもない	Bukan apa-apa.
+大丈夫	Nggak apa-apa.
+大丈夫？	Kamu nggak apa-apa?
+大丈夫か	Kamu baik-baik saja?
+大丈夫だ	Aku baik-baik saja.
+大丈夫です	Saya baik-baik saja.
+
+# --- Sapaan & sopan santun ---
+ありがとう	Makasih.
+ありがとうございます	Terima kasih banyak.
+本当にありがとう	Makasih banget, sungguh.
+どうも	Makasih.
+ごめん	Maaf.
+ごめんね	Maaf, ya.
+ごめんなさい	Maafkan aku.
+本当にごめん	Maaf banget.
+すみません	Maaf.
+すまない	Maaf.
+すまん	Sori.
+許して	Maafkan aku!
+失礼します	Permisi.
+失礼しました	Maaf mengganggu.
+お邪魔します	Permisi, aku masuk.
+どうぞ	Silakan.
+おはよう	Pagi!
+おはようございます	Selamat pagi.
+こんにちは	Halo.
+こんばんは	Selamat malam.
+おやすみ	Selamat tidur.
+おやすみなさい	Selamat tidur.
+ただいま	Aku pulang!
+おかえり	Selamat datang kembali.
+おかえりなさい	Selamat datang kembali.
+いただきます	Selamat makan!
+ごちそうさま	Terima kasih atas makanannya.
+ごちそうさまでした	Terima kasih atas makanannya.
+いってきます	Aku berangkat!
+行ってきます	Aku berangkat!
+いってらっしゃい	Hati-hati di jalan!
+お疲れ様	Kerja bagus hari ini.
+お疲れさま	Kerja bagus hari ini.
+お疲れ様です	Terima kasih atas kerja kerasnya.
+よろしく	Mohon bantuannya.
+よろしくお願いします	Mohon bantuannya.
+はじめまして	Salam kenal.
+さようなら	Selamat tinggal.
+じゃあね	Dah!
+またね	Sampai nanti!
+また明日	Sampai besok!
+
+# --- Perasaan & ancaman ---
+好き	Aku suka…
+好きです	Aku suka kamu.
+大好き	Aku sayang banget!
+嫌い	Benci!
+大嫌い	Aku benci kamu!
+愛してる	Aku cinta kamu.
+会いたい	Aku kangen…
+嘘つき	Pembohong!
+バカ	Bodoh!
+ばか	Bodoh!
+馬鹿	Bodoh!
+バカ野郎	Dasar bodoh!
+馬鹿野郎	Dasar bodoh!
+アホ	Dasar bego!
+ふざけるな	Jangan bercanda!
+ふざけんな	Jangan main-main!
+許さない	Tak akan kumaafkan!
+許さねえ	Tak akan kumaafkan!
+覚えてろ	Awas kau, ya!
+殺す	Kubunuh kau!
+死ね	Mati sana!
+終わりだ	Tamat sudah…
+
+# --- Panggilan ---
+先輩	Senpai!
+先生	Sensei!
+お兄ちゃん	Onii-chan!
+お姉ちゃん	Onee-chan!
+お母さん	Ibu!
+お父さん	Ayah!
+ママ	Mama!
+パパ	Papa!

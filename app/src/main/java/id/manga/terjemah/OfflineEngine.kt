@@ -1,5 +1,6 @@
 package id.manga.terjemah
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -15,25 +16,28 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
-import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * OCR + terjemahan ke Indonesia, semuanya di HP (Google ML Kit).
- * Bahasa sumber: Jepang (manga, termasuk teks vertikal) atau Korea (Weverse, webtoon, dll).
+ * OCR Jepang + terjemahan Jepang->Indonesia, semuanya di HP (Google ML Kit).
  *
  * Masalah utama ML Kit di manga: satu balon berisi teks vertikal dipecah jadi banyak potongan
  * (per kolom, kadang per huruf), lalu tiap potongan diterjemahkan sendiri-sendiri -> hasilnya aneh.
  * Di sini potongan-potongan itu digabung dulu per balon, diurutkan sesuai cara baca
  * (kolom kanan -> kiri, atas -> bawah), lalu balon vertikal dibaca ulang dengan resolusi lebih besar.
  * Baru setelah itu satu kalimat utuh diterjemahkan.
+ *
+ * Sebelum ke ML Kit, tiap balon dicek dulu ke [Kamus] (koreksi kamu, frasa manga, Tatoeba).
  */
-class OfflineEngine(private val lang: String = Prefs.LANG_JA) {
+class OfflineEngine(context: Context) {
 
-    private val korean = lang == Prefs.LANG_KO
+    private val app = context.applicationContext
+    private var cacheVersion = -1
 
     private enum class Orient { V, H, N } // vertikal, horizontal, netral (1 huruf / kotak)
 
@@ -46,12 +50,9 @@ class OfflineEngine(private val lang: String = Prefs.LANG_JA) {
         val charSize: Int get() = max(1, min(rect.width(), rect.height()))
     }
 
-    private val recognizer = if (korean) {
-        TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
-    } else {
+    private val recognizer =
         TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
-    }
-    private val translator = newTranslator(lang)
+    private val translator = newTranslator()
 
     private val cache = object : LinkedHashMap<String, String>(256, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 500
@@ -59,6 +60,11 @@ class OfflineEngine(private val lang: String = Prefs.LANG_JA) {
 
     /** @param exclude area yang diabaikan (tombol mengambang kita sendiri). */
     suspend fun translate(screen: Bitmap, exclude: Rect?): List<TextBox> {
+        withContext(Dispatchers.IO) { Kamus.ensureLoaded(app) }
+        if (cacheVersion != Kamus.version) { // daftar nama berubah -> hasil ML Kit lama basi
+            cache.clear()
+            cacheVersion = Kamus.version
+        }
         val result = recognizer.process(InputImage.fromBitmap(screen, 0)).await()
         val frags = toFrags(result, exclude, 0, 0, 1f)
 
@@ -67,17 +73,19 @@ class OfflineEngine(private val lang: String = Prefs.LANG_JA) {
             val rect = union(group)
             var jp = readGroup(group)
 
-            // Balon vertikal (manga Jepang): baca ulang potongan gambarnya dalam ukuran lebih besar.
-            if (!korean && isVertical(group)) {
+            // Balon vertikal: baca ulang potongan gambarnya dalam ukuran lebih besar.
+            if (isVertical(group)) {
                 val again = runCatching { reocr(screen, rect, group) }.getOrNull()
-                if (again != null && sourceCount(again) >= sourceCount(jp)) jp = again
+                if (again != null && japaneseCount(again) >= japaneseCount(jp)) jp = again
             }
 
             jp = cleanup(jp)
-            if (!isMostlySource(jp)) continue // lewati tombol/UI situs, angka, huruf tunggal
-            if (!korean && isSoundEffect(jp, screen, rect, group)) continue // efek suara dibiarkan asli
-            val id = cache[jp] ?: translateText(jp).also { cache[jp] = it }
-            if (id.isNotEmpty()) out += TextBox(rect, id)
+            if (!isMostlyJapanese(jp)) continue // lewati tombol/UI situs, angka, huruf tunggal
+            if (isSoundEffect(jp, screen, rect, group)) continue // efek suara dibiarkan asli
+            val id = Kamus.lookup(jp)
+                ?: cache[jp]
+                ?: translator.translate(Kamus.applyGlosarium(jp)).await().trim().also { cache[jp] = it }
+            if (id.isNotEmpty()) out += TextBox(rect, id, jp)
         }
         return dedupe(out)
     }
@@ -127,16 +135,13 @@ class OfflineEngine(private val lang: String = Prefs.LANG_JA) {
                 hGap <= size * 0.9f && vOverlap > min(a.rect.height(), b.rect.height()) * 0.2f
             // Dua baris horizontal bertumpuk dalam satu kotak
             a.orient == Orient.H && b.orient == Orient.H ->
-                vGap <= size * (if (korean) 0.5f else 0.8f) &&
-                    hOverlap > min(a.rect.width(), b.rect.width()) * 0.2f &&
-                    (!korean || abs(a.rect.left - b.rect.left) <= size * 2f) // baris 1 paragraf rata kiri
+                vGap <= size * 0.8f && hOverlap > min(a.rect.width(), b.rect.width()) * 0.2f
             // Huruf tunggal / potongan kecil: gabung kalau menempel
             else -> hGap <= size * 0.7f && vGap <= size * 0.7f
         }
     }
 
     private fun isVertical(group: List<Frag>): Boolean {
-        if (korean) return false // Korea di layar HP hampir selalu horizontal
         val v = group.count { it.orient == Orient.V }
         val h = group.count { it.orient == Orient.H }
         return v > h || (v == 0 && h == 0 && union(group).let { it.height() > it.width() * 1.2f })
@@ -145,9 +150,8 @@ class OfflineEngine(private val lang: String = Prefs.LANG_JA) {
     /** Urutan baca: vertikal = kolom kanan->kiri, tiap kolom atas->bawah; horizontal = atas->bawah. */
     private fun readGroup(group: List<Frag>): String {
         if (!isVertical(group)) {
-            // Korea memakai spasi antar kata, jadi antar baris diberi spasi.
             return group.sortedWith(compareBy<Frag>({ it.rect.top / max(1, it.charSize) }, { it.rect.left }))
-                .joinToString(if (korean) " " else "") { it.text }
+                .joinToString("") { it.text }
         }
         val sorted = group.sortedByDescending { it.rect.centerX() }
         val columns = mutableListOf<MutableList<Frag>>()
@@ -197,35 +201,12 @@ class OfflineEngine(private val lang: String = Prefs.LANG_JA) {
 
     // ---------------- Penyaring & perapian ----------------
 
-    private fun sourceCount(s: String) = s.count { isSourceChar(it, lang) }
+    private fun japaneseCount(s: String) = s.count { containsJapanese(it.toString()) }
 
-    /**
-     * Jepang: minimal separuh huruf Jepang. Korea: lebih longgar (minimal sepertiga), karena
-     * postingan/komentar sering bercampur kata Inggris, angka, dan emoji.
-     */
-    private fun isMostlySource(s: String): Boolean {
-        val core = s.filter { !it.isWhitespace() && it !in PUNCT && !Character.isSurrogate(it) }
-        val n = sourceCount(core)
-        return n >= 2 && n * (if (korean) 3 else 2) >= core.length
-    }
-
-    /**
-     * Terjemahan ML Kit sering kacau untuk slang chat Korea (ㅋㅋㅋ, ㅎㅎ, ㅠㅠ), jadi slang itu
-     * dicopot dulu, kalimatnya diterjemahkan, lalu padanan Indonesianya ditempel lagi di akhir.
-     */
-    private suspend fun translateText(src: String): String {
-        if (!korean) return translator.translate(src).await().trim()
-        val tails = mutableListOf<String>()
-        if (Regex("[ㅋ]{2,}").containsMatchIn(src)) tails += "wkwk"
-        if (Regex("[ㅎ]{2,}").containsMatchIn(src)) tails += "hehe"
-        if (Regex("[ㅠㅜ]{2,}").containsMatchIn(src)) tails += "ㅠㅠ"
-        val body = src.replace(Regex("[ㅋㅎㅠㅜ]{2,}"), " ").replace(Regex("\\s+"), " ").trim()
-        val translated = if (body.count { containsKorean(it.toString()) } >= 1) {
-            translator.translate(body).await().trim()
-        } else {
-            body // sisa tanpa huruf Korea (emoji, angka) dibiarkan
-        }
-        return (listOf(translated) + tails).filter { it.isNotBlank() }.joinToString(" ")
+    private fun isMostlyJapanese(s: String): Boolean {
+        val core = s.filter { !it.isWhitespace() && it !in PUNCT }
+        val jp = japaneseCount(core)
+        return jp >= 2 && jp * 2 >= core.length
     }
 
     /**
@@ -263,9 +244,7 @@ class OfflineEngine(private val lang: String = Prefs.LANG_JA) {
         return white.toFloat() / total
     }
 
-    private fun cleanup(s: String): String = if (korean) {
-        s.replace(Regex("\\s+"), " ").trim()
-    } else s
+    private fun cleanup(s: String): String = s
         .replace("\n", "")
         .replace(Regex("[.。・]{2,}|…+"), "…")
         .replace('!', '！')
@@ -301,19 +280,16 @@ class OfflineEngine(private val lang: String = Prefs.LANG_JA) {
     companion object {
         private const val PUNCT = "!?！？…・。、，,.~〜ー－-ｰ\"'「」『』()（）【】♡♪★☆"
 
-        private fun mlkitLang(lang: String) =
-            if (lang == Prefs.LANG_KO) TranslateLanguage.KOREAN else TranslateLanguage.JAPANESE
-
-        private fun newTranslator(lang: String): Translator = Translation.getClient(
+        private fun newTranslator(): Translator = Translation.getClient(
             TranslatorOptions.Builder()
-                .setSourceLanguage(mlkitLang(lang))
+                .setSourceLanguage(TranslateLanguage.JAPANESE)
                 .setTargetLanguage(TranslateLanguage.INDONESIAN)
                 .build()
         )
 
-        /** Unduh model terjemahan bahasa sumber + Indonesia (sekali saja, butuh internet). */
-        suspend fun downloadModels(lang: String) {
-            val t = newTranslator(lang)
+        /** Unduh model terjemahan (sekali saja, butuh internet). */
+        suspend fun downloadModels() {
+            val t = newTranslator()
             try {
                 t.downloadModelIfNeeded(DownloadConditions.Builder().build()).await()
             } finally {
@@ -321,12 +297,12 @@ class OfflineEngine(private val lang: String = Prefs.LANG_JA) {
             }
         }
 
-        /** Apakah model bahasa sumber & Indonesia sudah ada di HP. */
-        suspend fun modelsReady(lang: String): Boolean {
+        /** Apakah model Jepang & Indonesia sudah ada di HP. */
+        suspend fun modelsReady(): Boolean {
             val mgr = RemoteModelManager.getInstance()
-            val src = TranslateRemoteModel.Builder(mlkitLang(lang)).build()
+            val ja = TranslateRemoteModel.Builder(TranslateLanguage.JAPANESE).build()
             val id = TranslateRemoteModel.Builder(TranslateLanguage.INDONESIAN).build()
-            return mgr.isModelDownloaded(src).await() && mgr.isModelDownloaded(id).await()
+            return mgr.isModelDownloaded(ja).await() && mgr.isModelDownloaded(id).await()
         }
     }
 }

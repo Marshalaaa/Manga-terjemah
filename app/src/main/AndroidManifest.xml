@@ -24,6 +24,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Dibuka dari tombol 訳 di atas Chrome: tugas terpisah supaya setelah ditutup kembali ke Chrome. -->
+        <activity
+            android:name=".KoreksiActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".TranslatorService"
             android:exported="false"

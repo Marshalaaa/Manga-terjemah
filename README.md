@@ -5,35 +5,31 @@ teks Jepang di layar otomatis ditimpa kotak terjemahan bahasa Indonesia. Saat ka
 lagi, kotaknya hilang dan akan muncul lagi di posisi baru ketika layar diam.
 Semua berjalan **offline di HP** (Google ML Kit), gratis, tanpa API key.
 
-## Bahasa Korea (Weverse, webtoon, media sosial)
+## Kamus offline (biar terjemahan tidak kaku)
 
-Di layar utama pilih **Korea – Weverse, webtoon, media sosial**. Pilihan ini bisa diganti kapan saja,
-juga saat terjemahan live sedang berjalan.
-- **Mode Gemini (disarankan):** postingan artis, komentar, balasan, dan chat live dibaca per item,
-  lalu diterjemahkan dengan gaya bahasa fans Indonesia. Nama, sapaan (oppa, unnie, hyung) dan emoji
-  dipertahankan; ㅋㅋㅋ jadi "wkwk". Tombol, jumlah like, waktu posting, dan terjemahan bawaan Weverse dilewati.
-- **Mode offline:** ML Kit Korea. Tekan **Unduh model** lagi setelah memilih Korea (model terpisah dari Jepang).
-- Jalan di aplikasi Weverse maupun weverse.io di Chrome, karena yang dibaca adalah layar.
+Sebelum diterjemahkan ML Kit, isi tiap balon dicek dulu ke kamus, dengan urutan:
+1. **Koreksi buatanmu.** Tekan lama tombol **訳** untuk membetulkan terjemahan yang sedang tampil.
+   Kalau kalimat yang sama muncul lagi, terjemahanmu yang dipakai.
+2. **Frasa manga** (`app/src/main/assets/frasa_manga.tsv`), sekitar 290 ungkapan pendek yang sering
+   muncul (なんだと！？, くそっ, ちょっと待って…). Bebas diubah.
+3. **Kalimat Tatoeba** Jepang–Indonesia, diunduh otomatis oleh GitHub Actions setiap build
+   (`scripts/buat_kamus_tatoeba.py`). Sumber: [Tatoeba](https://tatoeba.org), lisensi CC BY 2.0 FR.
 
-## Mode online: Gemini (disarankan)
+Kalau tidak ada yang cocok, baru ML Kit dipakai. Sebelumnya nama-nama dari **Daftar nama**
+(misalnya `ヒカリ = Hikari`) dikunci dulu supaya tidak diterjemahkan jadi kata biasa.
 
-Mode ini jauh lebih akurat, terutama untuk teks vertikal dan bahasa gaul.
-1. Buka Google AI Studio (tombol ada di aplikasi), login, pilih *Create API key*.
-2. Tempel key di aplikasi, lalu tekan **Tes API key**.
-3. Model default `gemini-3.5-flash-lite` memakai tier gratis yang punya kuota harian.
-   Kalau kuota habis (HTTP 429), aplikasi otomatis memakai mode offline selama 10 menit lalu mencoba lagi.
-4. Layar yang sama tidak dikirim ulang (ada cache), jadi kuota lebih hemat.
-Catatan: data tier gratis boleh dipakai Google untuk meningkatkan layanannya.
+Pencocokan dilakukan per balon utuh. Tanda baca, spasi, ー dobel, dan っ di akhir diabaikan,
+jadi 「くそっ！」 dan 「くそ」 dianggap sama.
 
 ## Cara kerja singkat
 
 1. Layar direkam terus (izin rekam layar Android).
 2. Tiap frame diringkas jadi "sidik jari" kecil 24×48 kotak untuk mendeteksi scroll.
 3. Kalau layar bergerak, kotak terjemahan disembunyikan.
-4. Kalau layar diam 350 ms, frame dibaca (OCR Jepang), diterjemahkan, lalu kotak ditempel.
+4. Kalau layar diam 350 ms, frame dibaca (OCR Jepang), dicek ke kamus atau diterjemahkan ML Kit, lalu kotak ditempel.
 5. Terjemahan disimpan di cache, jadi saat scroll balik hasilnya langsung muncul.
 
-Tombol bulat **訳** dipakai untuk jeda atau lanjut (abu-abu berarti dijeda), dan bisa digeser ke mana saja.
+Tombol bulat **訳**: ketuk untuk jeda/lanjut (abu-abu berarti dijeda), tekan lama untuk koreksi, geser untuk memindahkan.
 
 ## Cara mendapatkan APK
 
@@ -73,6 +69,8 @@ app/src/main/java/id/manga/terjemah/
 ├── TranslatorService.kt      rekam layar + logika live (deteksi scroll/diam) + tombol 訳
 ├── FrameSignature.kt         sidik jari frame untuk deteksi gerak
 ├── OfflineEngine.kt          ML Kit: OCR Jepang + terjemahan on-device + cache
+├── Kamus.kt                  koreksi, frasa manga, Tatoeba, daftar nama
+├── KoreksiActivity.kt        layar koreksi (tekan lama 訳)
 ├── TranslationOverlayView.kt menggambar kotak terjemahan (tembus sentuhan)
 └── TranslationEngine.kt      model data
 ```
